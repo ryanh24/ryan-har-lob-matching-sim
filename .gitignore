@@ -1,0 +1,51 @@
+# Build artifacts
+build/
+out/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+compile_commands.json
+
+# Debug info
+*.dSYM/
+*.pdb
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.vs/
+.cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Reference materials cloned for study — not part of this project's source
+_reference/
+_data/
+
+# LOBSTER sample data (large, redistributable separately)
+*.csv.gz
+data/raw/
+
+# Benchmark output
+*.hgrm
+*.histogram
+results/
+
+# Local notes (uncomment if you want personal notes excluded; commented for now so reading notes are versioned)
+# notes-private/
