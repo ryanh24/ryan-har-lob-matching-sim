@@ -34,6 +34,9 @@ compile_commands.json
 .AppleDouble
 .LSOverride
 
+# Claude harness state
+.claude/
+
 # Reference materials cloned for study — not part of this project's source
 _reference/
 _data/
