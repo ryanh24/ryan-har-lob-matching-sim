@@ -79,6 +79,27 @@ Per entry: **what** was decided, **alternatives** considered, **why** this one w
   - Whether to use `uint16_t` indices for the `Limit` pool when migrating (active price levels are typically < 1000, so 16 bits is plenty and halves Limit-internal reference size again).
   - Hot/cold field splitting, hugepages, NUMA pinning, cache-line alignment, prefetching — all deferred until first benchmark shows where the bottleneck actually lives.
 
+### 2026-06-08 — Order-ID lookup: hand-rolled open-addressing hash map (orderID → OrderRef)
+
+- **What:** Cancel and execution messages reference an order by its LOBSTER order ID (a sparse, non-contiguous `uint64_t`). We resolve `orderID → OrderRef` through a hand-rolled flat hash map with this configuration:
+  - **Open addressing** (entries live in one flat array — no per-node allocation, no pointer chasing).
+  - **Linear probe sequence** (walk slot+1, slot+2 … on collision — sequential memory access, cache-friendly).
+  - **Power-of-two slot count** with bit-mask indexing (`h & (N-1)`, one AND instead of a modulo), held at a **low load factor (α ≤ 0.5)**.
+  - **Backward-shift deletion** — on erase, shift the trailing cluster back to fill the hole so the table stays tombstone-free.
+  - **Pluggable hash function**, swappable behind a single typedef/template param. Baseline = **modulo-prime** (intentionally the slow reference point); then **Fibonacci multiply-shift**; then explore **CRC32** (hardware `_mm_crc32_u64` / `__crc32cd`).
+  - Accessed only through `insert(id, ref)` / `find(id) → ref` / `erase(id)` so the backend can be replaced without touching engine code.
+- **Alternatives:** `std::unordered_map` (chaining + node-per-entry + allocator-heavy — scatters cache, slow tail); `absl::flat_hash_map` (Swiss/SIMD — fast but a heavy external dependency, and "I used Google's map" is a weaker interview story than "I wrote my own"); **prime** slot count (better memory granularity but reintroduces division on every lookup); **robin-hood** insertion discipline (bounds probe variance, but its payoff is at high α — unneeded at α ≤ 0.5); **tombstone** deletion (simple, but rots under the LOB's heavy cancel rate and forces periodic rebuilds that spike p99.9).
+- **Why:**
+  - **Open addressing + linear over chaining:** chaining adds a pointer per element and a random-memory walk per probe; open addressing keeps everything in one dense array with sequential probes. At a sub-µs target the dominant cost is cache misses, so density wins.
+  - **Power-of-two over prime (for now):** mask is ~1 cycle vs ~20–40 for a division on every lookup. The cost is coarser sizing (slot count jumps by 2×, wasting some slots) — but that waste is a few MB of cold RAM, cheap next to a per-op division. Prime's other virtue (bit-mixing that forgives a weak hash) is redundant once we mix bits in the hash function itself. **If we later raise α, revisit prime** (with Skarupke's constant-divisor switch trick to keep the modulo affordable).
+  - **Backward-shift deletion over tombstones:** the engine cancels constantly, so deletion frequency is high. Tombstones accumulate, lengthen probe chains, and break the α math even when few entries are live — then need a full rebuild (a latency spike that kills p99.9). Backward-shift keeps the table self-healing with no rebuild and no spike. It is the natural deletion partner to linear probing (Knuth's in-place Algorithm 6.4R).
+  - **Modulo-prime as the baseline hash:** chosen deliberately as the slow, simple reference implementation to measure improvement *from*. The Fibonacci → CRC progression then has a concrete before/after number behind it — methodology for the writeup, not premature optimization.
+  - **Pointer-stability note:** the map value (`OrderRef`) stays valid for an order's whole life because the slab pool never relocates a live slot (fixed-capacity array, no compaction). We never hold references *into* the hash map across mutations — we look up, take the value, use it immediately — so the map's own rehash/relocation behavior is irrelevant, which keeps every backend (including ones that move entries) safe to drop in.
+- **Open:**
+  - Final hash function after the baseline → Fibonacci → CRC benchmark.
+  - The α threshold at which we'd switch to prime sizing + robin-hood (the documented upgrade path).
+  - Map capacity: sized from the same message-file pre-scan that sizes the pools — track running live-order count (`+1` on add, `−1` on full delete/execution), take the max, then `next_pow2(max / α)`.
+
 ---
 
 *As this list grows, the conventional next step is to split it into one file per decision under `docs/decisions/0001-*.md` (the formal ADR pattern). Easy migration when it's needed.*
