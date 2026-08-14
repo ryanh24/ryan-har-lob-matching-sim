@@ -42,9 +42,15 @@ CLAUDE.md
 _reference/
 _data/
 
-# LOBSTER sample data (large, redistributable separately)
+# LOBSTER sample data (large, redistributable separately — fetch, don't commit)
 *.csv.gz
 data/raw/
+LOBSTER_SampleFile*/
+*_message_*.csv
+*_orderbook_*.csv
+
+# Personal reading/journal notes (kept local)
+docs/notes/
 
 # Benchmark output
 *.hgrm

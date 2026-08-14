@@ -24,7 +24,17 @@ See [`docs/plan.md`](docs/plan.md) — the research and scoping plan, including 
 
 ## Build
 
-Not yet — placeholder. Likely CMake + C++20. Benchmarks will require Linux (RDTSC, CPU pinning, hugepages); correctness work can be done on macOS.
+CMake + C++20. Scaffold only so far (compiles to an empty `liblob` + two placeholder binaries `verify` and `bench`); no engine logic yet.
+
+```
+cmake -S . -B build && cmake --build build
+```
+
+Benchmarks will run on x86-64 (RDTSC, CPU pinning; hugepages/`isolcpus` need Linux); correctness work is done on macOS.
+
+## Data
+
+LOBSTER sample files (message + orderbook CSVs) are **not committed** — they are large (a single AAPL hour is ~60 MB) and redistributable separately. Download a free sample from [lobsterdata.com/info/DataSamples.php](https://lobsterdata.com/info/DataSamples.php) and drop the unzipped folder in the repo root; it is gitignored.
 
 ---
 
@@ -99,6 +109,24 @@ Per entry: **what** was decided, **alternatives** considered, **why** this one w
   - Final hash function after the baseline → Fibonacci → CRC benchmark.
   - The α threshold at which we'd switch to prime sizing + robin-hood (the documented upgrade path).
   - Map capacity: sized from the same message-file pre-scan that sizes the pools — track running live-order count (`+1` on add, `−1` on full delete/execution), take the max, then `next_pow2(max / α)`.
+
+### 2026-06-08 — Codebase architecture: separated modules, `Book`/`Engine` split, one lib + two binaries
+
+- **What:** The code is organized as one static library `liblob` plus two thin binaries, with a clean module separation:
+  - **Public headers** under `include/lob/` (library convention): `types` (Side, `int32_t` Price, Qty, OrderId, `OrderRef`/`LimitRef` typedefs), `message` (parsed input record), `pool` (generic slab pool template), `order`, `limit`, `order_index` (the hash map), `book`, `engine`. Cold implementation in `src/*.cpp`.
+  - **Book / Engine are split:** `Book` owns storage only — the two per-side Limit trees, cached best-bid/ask pointers, and the primitives (`insert_order`, `remove_order`, `best_bid/ask`, `decrement`, `delete_level`). `Engine` owns behavior — `apply(Message)` dispatch and the matching loop, calling Book primitives.
+  - **Message is the seam** between parser and engine: `parser.cpp` turns LOBSTER CSV into `Message` and knows nothing about `Book`; `Engine` consumes `Message` and knows nothing about CSV. Swapping CSV for raw ITCH later touches only the parser.
+  - **`snapshot.cpp`** reads `Book` (never writes) to produce top-N levels and diff against the LOBSTER oracle.
+  - **Two binaries** over the shared lib: `verify` (binary B — replay + snapshot-diff → PASS/FAIL) and `bench` (binary A — time each `apply` → p50/p99/p99.9 + throughput). No TUI (Tier C / future work).
+  - **Default is compiled split** (`.hpp` declares, `.cpp` defines) for clean builds and separation; the **hot `Book` primitives touched inside the matching loop are `inline` in `book.hpp`** so the storage/matching boundary carries no per-call cost on the hot path. Cold Book ops stay in `book.cpp`.
+- **Alternatives:** a single combined `Book` class holding storage *and* matching (fewer files, but storage can't be tested without driving the matching path, and a second matching policy means forking the class); headers flat next to sources in `src/` instead of an `include/` tree (fine for a solo project, but the `include/lob/` convention keeps the public surface obvious and mirrors how the lib would be consumed); one monolithic binary with `--verify`/`--bench` flags instead of two.
+- **Why:**
+  - **Module separation** for maintenance and testability: the parser→`Message`→engine seam means each side is unit-testable in isolation and the input format is swappable without touching matching.
+  - **Book/Engine split** decouples the *data structure* from the *matching policy*. It shrinks each test surface (storage primitives tested without matching; matching tested against a stub book) and makes a future pro-rata policy or multi-symbol setup a change of `Engine` / a set of `Book`s rather than surgery on one fused class. The cost — an API boundary to draw correctly, and remembering to `inline` the hot primitives so the boundary is free on the hot path — is small and understood.
+  - **One lib + two thin binaries** keeps all engine logic in `liblob` (tested once) and the `main()`s as trivial wrappers, so the demos share exactly the same engine the tests exercise.
+- **Open:**
+  - `-fno-exceptions -fno-rtti` on `liblob` (hot-path hygiene) — intended, but deferred as a build-flag decision, not v1-blocking.
+  - Exact primitive set on the `Book` API — will firm up while writing the tracer-bullet slice; risk to watch is a boundary drawn so tight that matching pokes `Book` internals (leaky abstraction).
 
 ---
 
