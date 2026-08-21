@@ -128,6 +128,32 @@ Per entry: **what** was decided, **alternatives** considered, **why** this one w
   - `-fno-exceptions -fno-rtti` on `liblob` (hot-path hygiene) — intended, but deferred as a build-flag decision, not v1-blocking.
   - Exact primitive set on the `Book` API — will firm up while writing the tracer-bullet slice; risk to watch is a boundary drawn so tight that matching pokes `Book` internals (leaky abstraction).
 
+### 2026-08-18 — Tracer-bullet internals (grill session): validation, primitives, allocation, book structure, struct fields
+
+A single design-tree grill resolved the internals of the limit-only slice. Recorded as one entry (interrelated sub-decisions); each may split into its own ADR later.
+
+- **1. How the engine is exercised / validated.** The **matching loop is the deliverable**, and it is driven + proven by a **synthetic order generator + hand-written crossing scenarios** (asserted fills). **LOBSTER replay runs in apply-mode** — types 1/2/3/4 applied as book deltas to validate the *data structures* against the orderbook oracle — because LOBSTER is a resting-book event log: every type-1 already rested (did not cross), and aggressors appear only implicitly as type-4 executions, so feeding LOBSTER to the matcher never fires the crossing path. Making real data drive the matcher requires **reconstructing aggressor orders** from type-4 runs; that is **parked for the final runtime benchmark**, not the tracer bullet.
+  - *Alternatives:* LOBSTER-drives-matcher from day one (needs the fiddly reconstruction up front — rejected as a spine-blocker); pure synthetic only (no real-data validation — kept as a milestone instead).
+  - *Why:* unblocks the spine immediately while keeping the "engine reproduces NASDAQ executions" flex as a promoted near-term goal.
+
+- **2. Matching-loop semantics.** Crossing rule (one line, both sides): **buy crosses while `limit ≥ best_ask`; sell crosses while `limit ≤ best_bid`; a market order is that limit set to ±∞**. Fills take the **head of the level (FIFO / time priority)**; each fill is O(1). **The only AVL rebalance in the whole operation happens when a level empties (or a new price is born)** — fills never touch the tree. A residual that survives the crossing **flips to the resting side and rests at its limit** (a marketable order can be *taker and maker in one message*).
+
+- **3. Book/Engine primitive boundary.** The matching loop (in `Engine`) speaks exactly six verbs to storage (`Book`): `best_bid()` / `best_ask()`, `head_order(level)`, `reduce(order, qty)`, `remove_order(order)`, `insert_order(...)`, and `lookup(id)` for the cancel path. The matcher re-derived this set without reaching for anything else — evidence the boundary isn't leaky. Hot verbs (`best_*`, `head_order`, `reduce`) are `inline` in `book.hpp`.
+
+- **4. Allocation policy: stack value until it rests (Policy A).** The incoming aggressor is a **plain stack struct `{ side, price, remaining }`** while it matches; a **pool slot is allocated only if a residual survives to rest** (`insert_order` copies the three fields into a fresh pooled `Order`). A fully-filling marketable order — the hottest path — then costs **zero pool ops**; Policy B (pool every order on arrival) would waste an alloc+free (~10–20 ns) on exactly that path.
+  - *Cost accepted:* two order "shapes" (in-flight stack struct vs pooled resting `Order`) and one copy at rest-time.
+
+- **5. The book is three distinct structures, one job each.** (a) **AVL tree of `Limit`s** — finds where a *new* price splices in and stays balanced to keep that O(log M); (b) **level DLL** (`prev_level`/`next_level` on each `Limit`) — steps best → next-best in **O(1)** and gives snapshot its top-N-in-price-order walk for free; (c) **order DLL** (`prev`/`next` on each `Order`) — FIFO time priority within a level. Price lookup is the tree's job; order-by-ID lookup is the hash map's job; the two never overlap. **Priority is stored as *position*, not data** — the engine reads it off the layout, never compares it.
+  - *Alternatives:* in-order successor walk for best-advancement (O(log M), leaner `Limit`, no level DLL) — rejected because the level DLL is cheap (2 refs on <1000 nodes) and snapshot needs the ordered walk anyway.
+
+- **6. No timestamp on `Order`.** Time priority is structural (append at tail, match from head), LOBSTER messages arrive in sequence, and benchmarking times *processing* (RDTSC), never the message timestamp — so nothing on the hot path reads a time value. A timestamp is a cold field added only if reconstruction/analytics later needs it.
+
+- **7. `Order` fields = `{ next, prev, parent, shares, id }`.** Keep **`id`** (needed to erase the order from the ID-keyed hash index on fill/cancel — the fill-sweep walks by pointer, so the key must live on the struct). **Drop price** (derive via `parent->price`; the cancel path already holds `parent`). **Drop side** (implied by which book the order lives in; matching is side-specialized). As raw pointers this is 36 B → **padded to 64 B (one cache line) for v1**; the later uint32-index migration shrinks it to ~24 B → 32 B (two orders per line, ~half the misses on deep-queue walks). Staying on pointers keeps gdb ergonomics; migrate when the profiler shows queue-walks are cache-miss-bound.
+
+- **8. `Limit` fields = `{ parent, left, right, height, prev_level, next_level, head_order, tail_order, price, volume }`.** Maintain the **aggregated `volume` counter** (running total resting shares at the level), updated O(1) at every add/reduce/remove. Primary payoff: **snapshot reads level size in O(1)** instead of re-walking every order every message — and this helps *any* book-state read (synthetic asserts, analytics), not just LOBSTER; LOBSTER just exercises it hardest (once per message). Secondary: a cheap upfront matching branch-hint. `Limit`s are few (<~1000), so their size barely matters — the deferred `uint16` index shrink lands here later.
+
+- **Open (next grill):** synthetic generator design (distribution, guaranteeing crossing flow); snapshot/diff mechanics (top-N depth, tolerance, cadence); pool capacity sizing from the message-file pre-scan; cancel / partial-cancel (type 2 vs 3) semantics (`reduce` vs `remove_order`).
+
 ---
 
 *As this list grows, the conventional next step is to split it into one file per decision under `docs/decisions/0001-*.md` (the formal ADR pattern). Easy migration when it's needed.*
