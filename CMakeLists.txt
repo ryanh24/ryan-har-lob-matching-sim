@@ -28,3 +28,7 @@ target_link_libraries(verify PRIVATE lob)
 # --- binary A: latency histograms + throughput ---
 add_executable(bench apps/bench.cpp)
 target_link_libraries(bench PRIVATE lob)
+
+# --- tests ---
+add_executable(matching_test tests/matching_test.cpp)
+target_link_libraries(matching_test PRIVATE lob)

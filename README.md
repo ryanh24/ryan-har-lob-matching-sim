@@ -4,11 +4,19 @@ A price-time-priority limit order book matching engine in C++.
 
 ## Status
 
-**Research and design phase.** No engine code yet. Current work:
+**Tracer-bullet matching engine working.** Design tree resolved across two grill sessions (see
+the decision log below); the limit-order matching core is implemented and tested.
 
-1. Read foundational material on order book mechanics and existing implementations.
-2. Pick a scope tier (see [`docs/plan.md`](docs/plan.md)).
-3. Design the data structures via a grilling session before any code is written.
+Done:
+- `Order` / `Limit` structs, a heap-backed slab `Pool` with an intrusive free list.
+- `Book` storage primitives (`best_bid/ask`, `head_order`, `reduce`, `insert_order`,
+  `remove_order`, `lookup`) over `std::map` + `std::unordered_map` stand-ins.
+- `Engine` matching loop — both sides — with price-time priority, partial fills, level
+  deletion, and residual resting. Proven by `matching_test` (buy- and sell-side sweeps).
+
+Next: swap the `std::` stand-ins for a hand-rolled AVL tree and open-addressing index (with
+head-to-head benchmarks); LOBSTER parser + `verify` (apply-mode oracle diff); the MC order
+generator + `bench` latency histograms.
 
 ## Goal
 
@@ -24,10 +32,12 @@ See [`docs/plan.md`](docs/plan.md) — the research and scoping plan, including 
 
 ## Build
 
-CMake + C++20. Scaffold only so far (compiles to an empty `liblob` + two placeholder binaries `verify` and `bench`); no engine logic yet.
+CMake + C++20. Builds `liblob` (the engine), the `verify` / `bench` binaries (still
+placeholders), and `matching_test`.
 
 ```
 cmake -S . -B build && cmake --build build
+./build/matching_test
 ```
 
 Benchmarks will run on x86-64 (RDTSC, CPU pinning; hugepages/`isolcpus` need Linux); correctness work is done on macOS.
