@@ -32,3 +32,6 @@ target_link_libraries(bench PRIVATE lob)
 # --- tests ---
 add_executable(matching_test tests/matching_test.cpp)
 target_link_libraries(matching_test PRIVATE lob)
+
+add_executable(index_test tests/index_test.cpp)
+target_link_libraries(index_test PRIVATE lob)

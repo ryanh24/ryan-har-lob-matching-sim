@@ -1,10 +1,10 @@
 #pragma once
 #include "lob/types.hpp"
 #include <map>
-#include <unordered_map>
 #include "lob/order.hpp"
 #include "lob/limit.hpp"
 #include "lob/pool.hpp"
+#include "lob/order_index.hpp"
 
 // Storage only: two per-side AVL trees of Limit levels, cached best-bid/ask pointers,
 // the Order/Limit pools, and the orderID index. Exposes primitives the Engine calls.
@@ -18,7 +18,7 @@ namespace lob {
         private:
             std::map<Price, Limit> asks_;
             std::map<Price, Limit> bids_;
-            std::unordered_map<OrderId, Order*> index_;
+            OrderIndex index_;                       // hand-rolled open-addressing map
             Pool<Order, (1u << 20 )> order_pool_;
         public:
             // Hot primitives — inline here (see architecture decision).
@@ -29,10 +29,7 @@ namespace lob {
             // Cold primitives — defined in book.cpp.
             void   remove_order(Order* o);
             Order* insert_order(Side side, Price price, Qty shares, OrderId id);
-            // lookup uses find(), not index_[id] — operator[] would INSERT a null on a miss.
-            Order* lookup(OrderId id) {
-                auto it = index_.find(id);
-                return it == index_.end() ? nullptr : it->second;
-            }
+            // OrderIndex::find returns the Order* directly (nullptr on miss).
+            Order* lookup(OrderId id) { return index_.find(id); }
     };
 } // namespace lob

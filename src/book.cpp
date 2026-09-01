@@ -47,7 +47,7 @@ Order* Book::insert_order(Side side, Price price, Qty shares, OrderId id) {
     }
 
     level.volume += shares; // keep volume + index in sync
-    index_[id]    = o;
+    index_.insert(id, o);
     return o;
 }
 
