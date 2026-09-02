@@ -20,10 +20,15 @@ Done:
 - Tests: `matching_test` (buy/sell sweeps), `avl_test` (balance + 200k randomized vs `std::set`),
   `index_test` (ops + 500k randomized vs `std::unordered_map`).
 
-Next: LOBSTER parser + `verify` (apply-mode oracle diff, handling the warm-start issue); the MC
-order generator + `bench` latency histograms; then the head-to-head benchmarks (hand-rolled vs
-`std::`) on the Linux bench host. Deferred, profile-driven: cached best pointers + level-DLL (O(1)
-best-advance), pointer→index migration, hot/cold split.
+Also done: LOBSTER parser + orderbook parser + snapshot/diff, and `verify` — reframed as a
+reconstruction-fidelity characterizer after establishing that a level-N LOBSTER *message* file is
+top-N-filtered (deep liquidity surfaces without a message trail, so exact replay is impossible; see
+the decision log).
+
+Next: the calibrated MC order generator (power-law depth + GBM mid) + `bench` latency histograms;
+then the head-to-head benchmarks (hand-rolled vs `std::`) on the Linux bench host. Deferred,
+profile-driven: cached best pointers + level-DLL (O(1) best-advance), pointer→index migration,
+hot/cold split.
 
 ## Goal
 
@@ -183,6 +188,14 @@ Second grill closing the four branches left open above. Interrelated; may split 
 - **3. Pool sizing — fixed generous capacities, panic on exhaustion.** `Order` pool = 2²⁰ (~1M slots, ~64 MB), `Limit` pool = 2¹⁶ (~64k), both powers of two. **No dynamic growth** — a mid-run realloc would move the arena and invalidate every live pointer (the thing the slab pool exists to avoid); instead size once at startup and **panic loudly** if exceeded. This mirrors production: engines pre-allocate a fixed arena from historical worst-case and reject/halt rather than grow. (A message-file pre-scan to size from actual peak-live orders is a later refinement, deferred; fixed caps get us to running code now.)
 
 - **4. Synthetic order generator — a seeded, knob-driven experimental instrument.** Two distinct things: **(a) hand-written correctness scenarios** — specific deterministic cases with asserted fills (partial fill, multi-level sweep, exhaust-limit-then-rest, empty-level rebalance, cancel-from-middle) — this is what actually proves price-time priority, since LOBSTER can't fire the matcher. **(b) A load generator** for benchmarking: a **seeded Monte-Carlo random-walk mid-price** with resting adds clustered around the drifting touch and marketable orders that cross *by construction* (the generator knows its own best bid/ask). **Knobs:** `%add / %cancel / %marketable`, price spread, size distribution, arrival frequencies. Each emitted order is **tagged with its op type** so the bench harness reports **per-operation** latency distributions. Two profiles from the same generator: a **realistic** ~95% add+cancel profile (headline throughput) and a **matching-heavy** profile (labeled stress test, for probing p99/p99.9 and measuring the cost of the matching loop vs a plain add). Seed is fixed so knob-vs-knob comparisons differ only by the knob. Realism guardrail: keep steps/dispersion in plausible tick ranges; never quote the stress profile's numbers as real-market throughput. Sweeping the knobs yields the Tier-B writeup curves (latency vs depth, latency vs mix).
+
+### 2026-09-02 — LOBSTER verify reframed as a fidelity characterizer (message-file completeness gap)
+
+- **What:** `verify` seeds the book from the first orderbook snapshot and replays the message file, but it does **not** pass/fail. It reports how deep exact top-N reconstruction holds and for how long — a fidelity curve. Correctness of the engine itself rests on the synthetic `matching_test`; the benchmark workload is synthetic-and-calibrated (see next steps).
+- **The finding (empirical):** a level-N LOBSTER **message file is filtered to top-N-affecting events**. An order placed while its price sits *deeper* than level N generates **no message**; when the book later shifts and that price surfaces into the top-N, the orderbook file shows liquidity with **no message trail**. Proven at price `5875000` in the AAPL sample: the message file adds **10** shares there, yet the oracle shows **394**. So exact top-N reconstruction *from the message file alone is impossible* — the **input is incomplete**, not the engine (an infinite-level engine couldn't do it either).
+- **Alternatives:** (a) full-depth raw ITCH — a complete feed that would make reconstruction exact, but out of scope (paid / not LOBSTER's level-limited output); (b) read the orderbook file directly as book state (no reconstruction) — fine for research, but doesn't exercise the engine; (c) **seed + best-effort replay + characterize fidelity** — chosen.
+- **Field validation:** the two "lobster"-named repos surveyed ([rubik/lobster](https://github.com/rubik/lobster), [DylanBT928/lobster](https://github.com/DylanBT928/lobster)) are matching engines that don't replay LOBSTER at all; a matching-engine benchmark paper ([arXiv 2606.01183](https://arxiv.org/html/2606.01183v6)) stresses the matcher with **synthetic bursts calibrated to real statistics** (power-law depth, geometric-Brownian-motion prices), *explicitly excluding real-market-data complexity*. The field tests matchers on calibrated synthetics, not LOBSTER replay — so this is the standard call, not a compromise.
+- **Result:** the top-of-book reconstructs exactly for ~8.8% of the AAPL file (~7,600 messages) before the completeness gap surfaces; fidelity falls off with depth. The best-effort phantom-reduce handles *seeded* pre-existing cancels but is unsound for *deep-surfaced* orders — an accepted limitation, since the two can't be told apart from the filtered feed.
 
 ---
 
