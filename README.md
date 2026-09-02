@@ -4,19 +4,26 @@ A price-time-priority limit order book matching engine in C++.
 
 ## Status
 
-**Tracer-bullet matching engine working.** Design tree resolved across two grill sessions (see
-the decision log below); the limit-order matching core is implemented and tested.
+**Matching engine running on hand-rolled data structures.** Design tree resolved across two grill
+sessions (see the decision log below); the limit-order core is implemented, self-contained, and
+tested.
 
 Done:
-- `Order` / `Limit` structs, a heap-backed slab `Pool` with an intrusive free list.
+- `Order` / `Limit` structs; a heap-backed slab `Pool` with an intrusive free list.
+- Hand-rolled **`OrderIndex`** (open addressing, linear probing, Fibonacci hash, backward-shift
+  deletion) and **`PriceTree`** (recursive AVL of price levels) — no `std::` containers remain in
+  the book.
 - `Book` storage primitives (`best_bid/ask`, `head_order`, `reduce`, `insert_order`,
-  `remove_order`, `lookup`) over `std::map` + `std::unordered_map` stand-ins.
-- `Engine` matching loop — both sides — with price-time priority, partial fills, level
-  deletion, and residual resting. Proven by `matching_test` (buy- and sell-side sweeps).
+  `remove_order`, `lookup`).
+- `Engine` matching loop — both sides — with price-time priority, partial fills, level deletion,
+  and residual resting.
+- Tests: `matching_test` (buy/sell sweeps), `avl_test` (balance + 200k randomized vs `std::set`),
+  `index_test` (ops + 500k randomized vs `std::unordered_map`).
 
-Next: swap the `std::` stand-ins for a hand-rolled AVL tree and open-addressing index (with
-head-to-head benchmarks); LOBSTER parser + `verify` (apply-mode oracle diff); the MC order
-generator + `bench` latency histograms.
+Next: LOBSTER parser + `verify` (apply-mode oracle diff, handling the warm-start issue); the MC
+order generator + `bench` latency histograms; then the head-to-head benchmarks (hand-rolled vs
+`std::`) on the Linux bench host. Deferred, profile-driven: cached best pointers + level-DLL (O(1)
+best-advance), pointer→index migration, hot/cold split.
 
 ## Goal
 
