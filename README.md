@@ -23,12 +23,15 @@ Done:
 Also done: LOBSTER parser + orderbook parser + snapshot/diff, and `verify` — reframed as a
 reconstruction-fidelity characterizer after establishing that a level-N LOBSTER *message* file is
 top-N-filtered (deep liquidity surfaces without a message trail, so exact replay is impossible; see
-the decision log).
+the decision log). And the full benchmark path: a **calibrated MC generator** (GBM mid + power-law
+depth + add/cancel/marketable mix, seeded/reproducible) and `bench` (throughput + per-op p50/p90/
+p99/p99.9/max). macOS smoke run: ~20M ops/s, ~50 ns/op amortized (per-op tails are timer-floored on
+Apple Silicon — authoritative numbers come from Linux).
 
-Next: the calibrated MC order generator (power-law depth + GBM mid) + `bench` latency histograms;
-then the head-to-head benchmarks (hand-rolled vs `std::`) on the Linux bench host. Deferred,
-profile-driven: cached best pointers + level-DLL (O(1) best-advance), pointer→index migration,
-hot/cold split.
+The tracer-bullet spine is complete end to end, running on hand-rolled structures. Next: run `bench`
+on the Linux host (RDTSC, CPU pinning, hugepages) for authoritative tails, plus the head-to-head
+(hand-rolled AVL/index vs `std::`); then the writeup. Deferred, profile-driven: cached best pointers
++ level-DLL (O(1) best-advance), pointer→index migration, hot/cold split.
 
 ## Goal
 
