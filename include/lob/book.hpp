@@ -1,29 +1,27 @@
 #pragma once
 #include "lob/types.hpp"
-#include <map>
 #include "lob/order.hpp"
 #include "lob/limit.hpp"
 #include "lob/pool.hpp"
+#include "lob/price_tree.hpp"
 #include "lob/order_index.hpp"
 
-// Storage only: two per-side AVL trees of Limit levels, cached best-bid/ask pointers,
-// the Order/Limit pools, and the orderID index. Exposes primitives the Engine calls.
-// Hot primitives (best_bid/ask, pop-front, decrement) are inline HERE so the
-// storage/matching boundary is free on the hot path (see README architecture decision).
-// TODO(tracer-bullet): class Book with insert_order / remove_order / best_bid / best_ask
-//                      / decrement / delete_level.
+// Storage only: two per-side AVL trees (PriceTree) of Limit levels, the Order pool, and the
+// hand-rolled order-ID index. Exposes the primitives the Engine's matching loop calls. Hot
+// primitives are inline here so the storage/matching boundary is free on the hot path
+// (see README architecture decision).
 
 namespace lob {
     class Book {
         private:
-            std::map<Price, Limit> asks_;
-            std::map<Price, Limit> bids_;
-            OrderIndex index_;                       // hand-rolled open-addressing map
-            Pool<Order, (1u << 20 )> order_pool_;
+            PriceTree  asks_;
+            PriceTree  bids_;
+            OrderIndex index_;                    // hand-rolled open-addressing map
+            Pool<Order, (1u << 20)> order_pool_;  // ~1M order slots
         public:
-            // Hot primitives — inline here (see architecture decision).
-            Limit* best_ask() { return asks_.empty() ? nullptr : &asks_.begin()->second; }
-            Limit* best_bid() { return bids_.empty() ? nullptr : &bids_.rbegin()->second; }
+            // Hot primitives — inline (best-of-side is the tree's min/max; nullptr if empty).
+            Limit* best_ask() { return asks_.min(); }   // lowest ask price
+            Limit* best_bid() { return bids_.max(); }   // highest bid price
             Order* head_order(Limit* l) { return l->head; }
             void   reduce(Order* o, Qty q) { o->shares -= q; o->parent->volume -= q; }
             // Cold primitives — defined in book.cpp.
