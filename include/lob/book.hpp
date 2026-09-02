@@ -29,5 +29,9 @@ namespace lob {
             Order* insert_order(Side side, Price price, Qty shares, OrderId id);
             // OrderIndex::find returns the Order* directly (nullptr on miss).
             Order* lookup(OrderId id) { return index_.find(id); }
+
+            // Read-only top-N views for the snapshot (asks ascending, bids descending).
+            void top_asks(int n, std::vector<std::pair<Price, Qty>>& out) const { asks_.top_ascending(n, out); }
+            void top_bids(int n, std::vector<std::pair<Price, Qty>>& out) const { bids_.top_descending(n, out); }
     };
 } // namespace lob

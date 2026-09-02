@@ -41,3 +41,6 @@ target_link_libraries(avl_test PRIVATE lob)
 
 add_executable(parser_test tests/parser_test.cpp)
 target_link_libraries(parser_test PRIVATE lob)
+
+add_executable(snapshot_test tests/snapshot_test.cpp)
+target_link_libraries(snapshot_test PRIVATE lob)

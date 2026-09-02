@@ -4,7 +4,8 @@
 #include "lob/pool.hpp"
 #include <algorithm>   // std::max
 #include <cstdlib>     // std::abs
-#include <vector>      // test helpers
+#include <vector>      // top-N walk / test helpers
+#include <utility>     // std::pair
 
 // A hand-rolled AVL tree of Limit price levels — one per side, replacing std::map<Price, Limit>.
 // Recursive AVL with intrusive links on Limit (left/right/height); no parent pointer needed.
@@ -120,6 +121,22 @@ class PriceTree {
         inorder(n->left, out); out.push_back(n->price); inorder(n->right, out);
     }
 
+    // early-stopping ordered walks for top-N snapshots
+    static void asc(Limit* n, int lim, std::vector<std::pair<Price, Qty>>& out) {
+        if (!n || (int)out.size() >= lim) return;
+        asc(n->left, lim, out);
+        if ((int)out.size() >= lim) return;
+        out.emplace_back(n->price, n->volume);
+        asc(n->right, lim, out);
+    }
+    static void desc(Limit* n, int lim, std::vector<std::pair<Price, Qty>>& out) {
+        if (!n || (int)out.size() >= lim) return;
+        desc(n->right, lim, out);
+        if ((int)out.size() >= lim) return;
+        out.emplace_back(n->price, n->volume);
+        desc(n->left, lim, out);
+    }
+
 public:
     bool empty() const { return root_ == nullptr; }
 
@@ -145,6 +162,10 @@ public:
 
     Limit* min() const { Limit* n = root_; if (!n) return nullptr; while (n->left)  n = n->left;  return n; } // best ask
     Limit* max() const { Limit* n = root_; if (!n) return nullptr; while (n->right) n = n->right; return n; } // best bid
+
+    // top-N levels in book order: ascending (asks, best first) / descending (bids, best first)
+    void top_ascending(int n, std::vector<std::pair<Price, Qty>>& out)  const { asc(root_, n, out); }
+    void top_descending(int n, std::vector<std::pair<Price, Qty>>& out) const { desc(root_, n, out); }
 
     // test-only helpers
     bool balanced() const { return check_balanced(root_); }
