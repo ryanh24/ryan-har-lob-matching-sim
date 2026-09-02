@@ -18,6 +18,7 @@ add_library(lob STATIC
   src/engine.cpp
   src/parser.cpp
   src/snapshot.cpp
+  src/generator.cpp
 )
 target_include_directories(lob PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
@@ -44,3 +45,6 @@ target_link_libraries(parser_test PRIVATE lob)
 
 add_executable(snapshot_test tests/snapshot_test.cpp)
 target_link_libraries(snapshot_test PRIVATE lob)
+
+add_executable(generator_test tests/generator_test.cpp)
+target_link_libraries(generator_test PRIVATE lob)
