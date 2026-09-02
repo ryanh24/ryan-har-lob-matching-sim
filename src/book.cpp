@@ -24,6 +24,15 @@ void Book::remove_order(Order* o) {
     }
 }
 
+void Book::phantom_reduce(Side side, Price price, Qty qty) {
+    PriceTree& tree = (side == Side::Buy) ? bids_ : asks_;
+    Limit* level = tree.find(price);
+    if (!level || level->head == nullptr) return;   // nothing to reduce
+    Order* o = level->head;                          // the seed (oldest) order at this level
+    if (qty >= o->shares) remove_order(o);           // consume it entirely (may delete the level)
+    else                  reduce(o, qty);            // partial: aggregate drops by qty
+}
+
 Order* Book::insert_order(Side side, Price price, Qty shares, OrderId id) {
     PriceTree& book_side = (side == Side::Buy) ? bids_ : asks_;
     Limit* level = book_side.find_or_create(price); // returns existing level or a fresh one

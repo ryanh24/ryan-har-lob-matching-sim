@@ -27,6 +27,9 @@ namespace lob {
             // Cold primitives — defined in book.cpp.
             void   remove_order(Order* o);
             Order* insert_order(Side side, Price price, Qty shares, OrderId id);
+            // Warm-start support (LOBSTER verify): reduce a level by price when the specific
+            // order isn't tracked (a pre-existing order). Reduces the level's head (oldest) order.
+            void   phantom_reduce(Side side, Price price, Qty qty);
             // OrderIndex::find returns the Order* directly (nullptr on miss).
             Order* lookup(OrderId id) { return index_.find(id); }
 
