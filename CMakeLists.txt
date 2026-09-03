@@ -30,6 +30,9 @@ target_link_libraries(verify PRIVATE lob)
 add_executable(bench apps/bench.cpp)
 target_link_libraries(bench PRIVATE lob)
 
+add_executable(structbench apps/structbench.cpp)
+target_link_libraries(structbench PRIVATE lob)
+
 # --- tests ---
 add_executable(matching_test tests/matching_test.cpp)
 target_link_libraries(matching_test PRIVATE lob)
