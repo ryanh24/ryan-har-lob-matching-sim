@@ -14,8 +14,6 @@ add_compile_options(-Wall -Wextra)
 
 # --- liblob: all engine logic lives here, tested once, shared by both binaries ---
 add_library(lob STATIC
-  src/book.cpp
-  src/engine.cpp
   src/parser.cpp
   src/snapshot.cpp
   src/generator.cpp

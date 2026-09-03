@@ -200,6 +200,13 @@ Second grill closing the four branches left open above. Interrelated; may split 
 - **Field validation:** the two "lobster"-named repos surveyed ([rubik/lobster](https://github.com/rubik/lobster), [DylanBT928/lobster](https://github.com/DylanBT928/lobster)) are matching engines that don't replay LOBSTER at all; a matching-engine benchmark paper ([arXiv 2606.01183](https://arxiv.org/html/2606.01183v6)) stresses the matcher with **synthetic bursts calibrated to real statistics** (power-law depth, geometric-Brownian-motion prices), *explicitly excluding real-market-data complexity*. The field tests matchers on calibrated synthetics, not LOBSTER replay — so this is the standard call, not a compromise.
 - **Result:** the top-of-book reconstructs exactly for ~8.8% of the AAPL file (~7,600 messages) before the completeness gap surfaces; fidelity falls off with depth. The best-effort phantom-reduce handles *seeded* pre-existing cancels but is unsound for *deep-surfaced* orders — an accepted limitation, since the two can't be told apart from the filtered feed.
 
+### 2026-09-02 — Templated `Book`/`Engine` on the container (whole-engine head-to-head)
+
+- **What:** `Book` and `Engine` are now templates parameterized on the price-level tree and the order-id index. `Book = BookT<PriceTree, OrderIndex>` is the real engine; `BookStd = BookT<StdTree, StdIndex>` is a `std::map`/`std::unordered_map` baseline; `Engine = EngineT<Book>`. `bench` runs the *same* workload through the *same* matching loop on both backends — a whole-engine comparison, not just isolated structures.
+- **Supersedes** the hot/cold `.hpp`/`.cpp` split from the 2026-08-18 architecture entry: a template must be header-only, so all `Book`/`Engine` methods are now inline in the headers (`book.cpp`/`engine.cpp` removed). Header-only is fine here — it only helps inlining, and the build-time cost is negligible at this size.
+- **Why:** to measure the whole engine hand-rolled-vs-`std::` for real p99.9 tails, which the isolated `structbench` can't show. Result (macOS, indicative): **~20.5M ops/s vs ~11.1M ops/s (~1.8×)**, and — the headline — `std::` shows a **~2 ms max** latency outlier (an allocation/rehash spike) against the hand-rolled engine's **~61 µs** max. That is the slab-pool + open-addressing "no malloc tail" decision validated empirically in the tail.
+- **Open:** structbench keeps its own local `std::` adapters; could be de-duplicated against `std_containers.hpp` later (cosmetic).
+
 ---
 
 *As this list grows, the conventional next step is to split it into one file per decision under `docs/decisions/0001-*.md` (the formal ADR pattern). Easy migration when it's needed.*
