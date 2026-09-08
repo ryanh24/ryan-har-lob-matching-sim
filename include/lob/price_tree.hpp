@@ -18,6 +18,8 @@ class PriceTree {
     static constexpr size_t CAP = 1u << 16;   // up to 65,536 active price levels
     Pool<Limit, CAP> pool_;
     Limit* root_ = nullptr;
+    Limit* min_  = nullptr;   // cached leftmost  (smallest price) — O(1) best ask
+    Limit* max_  = nullptr;   // cached rightmost (largest price)  — O(1) best bid
 
     // Height = longest path down to a leaf (empty subtree = 0, leaf = 1).
     static int  height(Limit* n)  { return n ? n->height : 0; }
@@ -150,18 +152,41 @@ public:
         return nullptr;
     }
 
-    // Return the level at price p, creating it if absent.
+    // Return the level at price p, creating it if absent. A new level is spliced into the
+    // price-ordered level list between its in-order predecessor and successor (found during the
+    // descent), and the cached min_/max_ are updated — all O(1) on top of the O(log M) insert.
     Limit* find_or_create(Price p) {
-        if (Limit* e = find(p)) return e;
+        Limit* node = root_;
+        Limit* pred = nullptr;   // largest price < p on the path
+        Limit* succ = nullptr;   // smallest price > p on the path
+        while (node) {
+            if (p < node->price)      { succ = node; node = node->left; }
+            else if (p > node->price) { pred = node; node = node->right; }
+            else return node;        // already exists
+        }
         Limit* n = new_limit(p);
-        root_ = insert_node(root_, n);
+        n->prev_level = pred;
+        n->next_level = succ;
+        if (pred) pred->next_level = n; else min_ = n;   // no smaller price → new leftmost
+        if (succ) succ->prev_level = n; else max_ = n;   // no larger price → new rightmost
+        root_ = insert_node(root_, n);   // AVL insert + rebalance (tree structure only)
         return n;
     }
 
-    void erase(Price p) { root_ = erase_rec(root_, p); }
+    // Remove the level at price p: unlink from the level list (advancing min_/max_ if it was an
+    // extreme), then delete from the tree. Rotations don't touch price order, so the list and the
+    // cached extremes stay valid across rebalancing.
+    void erase(Price p) {
+        Limit* node = find(p);
+        if (!node) return;
+        Limit* pv = node->prev_level, *nx = node->next_level;
+        if (pv) pv->next_level = nx; else min_ = nx;   // node was the leftmost
+        if (nx) nx->prev_level = pv; else max_ = pv;   // node was the rightmost
+        root_ = erase_rec(root_, p);                   // remove from tree (frees node)
+    }
 
-    Limit* min() const { Limit* n = root_; if (!n) return nullptr; while (n->left)  n = n->left;  return n; } // best ask
-    Limit* max() const { Limit* n = root_; if (!n) return nullptr; while (n->right) n = n->right; return n; } // best bid
+    Limit* min() const { return min_; }   // best ask (smallest price) — O(1)
+    Limit* max() const { return max_; }   // best bid (largest price)  — O(1)
 
     // top-N levels in book order: ascending (asks, best first) / descending (bids, best first)
     void top_ascending(int n, std::vector<std::pair<Price, Qty>>& out)  const { asc(root_, n, out); }
@@ -170,6 +195,10 @@ public:
     // test-only helpers
     bool balanced() const { return check_balanced(root_); }
     void collect_inorder(std::vector<Price>& out) const { inorder(root_, out); }
+    // walk the level-DLL from min_ via next_level — must equal the sorted in-order sequence
+    void collect_via_dll(std::vector<Price>& out) const {
+        for (Limit* n = min_; n; n = n->next_level) out.push_back(n->price);
+    }
 };
 
 } // namespace lob

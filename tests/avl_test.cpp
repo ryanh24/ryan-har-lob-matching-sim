@@ -61,6 +61,12 @@ int main() {
     check(agree, "randomized ops agree with std::set (membership, min, max)");
     check(mine.balanced(), "balanced after randomized ops");
 
+    // The level-DLL (min_ → next_level) must match the tree's sorted order exactly.
+    std::vector<Price> via_tree, via_dll;
+    mine.collect_inorder(via_tree);
+    mine.collect_via_dll(via_dll);
+    check(via_tree == via_dll, "level-DLL order matches in-order traversal (O(1) best-of-side intact)");
+
     if (failures == 0) { std::puts("avl_test: all assertions passed"); return 0; }
     std::printf("avl_test: %d FAILURE(S)\n", failures);
     return 1;

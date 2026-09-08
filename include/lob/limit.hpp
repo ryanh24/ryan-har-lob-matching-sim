@@ -15,5 +15,8 @@ namespace lob {
         Limit* left   = nullptr;
         Limit* right  = nullptr;
         int    height = 1;     // leaf = 1; empty subtree treated as height 0
+        // --- price-ordered level list (for O(1) best-of-side advance) ---
+        Limit* prev_level = nullptr;  // next-worse price (toward min for asks / away from touch)
+        Limit* next_level = nullptr;  // next-better price
     };
 } // namespace lob
