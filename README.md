@@ -1,71 +1,71 @@
-# ryan-har-lob-matching-sim
+# Limit Order Book Matching Engine (C++20)
 
-A price-time-priority limit order book matching engine in C++.
+A price-time-priority limit order book matching engine, built hand-rolled from the data structures
+up — **no `std::` containers on the hot path** — then benchmarked head-to-head against `std::` and
+validated against real NASDAQ ([LOBSTER](https://data.lobsterdata.com/)) data.
 
-## Status
+## Results (Ryzen 7600X, Linux)
 
-**Matching engine running on hand-rolled data structures.** Design tree resolved across two grill
-sessions (see the decision log below); the limit-order core is implemented, self-contained, and
-tested.
+- **37 M messages/s** through the full engine on calibrated synthetic order flow.
+- **Faster than `std::`:** the hand-rolled hash index is **1.9×** `std::unordered_map` and the AVL
+  price tree **1.2×** `std::map` in isolation; **~28% faster end-to-end** (same matching loop, only
+  the containers swapped).
+- **Bounded tail latency:** ~34 µs max vs `std::`'s ~352 µs allocation spike — the slab-pool +
+  open-addressing "no malloc on the hot path" design showing up exactly where it matters, the tail.
+- **A measured optimization:** making best-of-side O(1) (cached extremes + a price-ordered level
+  list) lifted whole-engine throughput ~16% and the advantage over `std::` from 8% → 28%.
+- **Correctness:** the matching loop is proven by asserted scenarios; the AVL and hash map are
+  cross-checked against `std::set` / `std::unordered_map` over 200k–500k randomized ops.
 
-Done:
-- `Order` / `Limit` structs; a heap-backed slab `Pool` with an intrusive free list.
-- Hand-rolled **`OrderIndex`** (open addressing, linear probing, Fibonacci hash, backward-shift
-  deletion) and **`PriceTree`** (recursive AVL of price levels) — no `std::` containers remain in
-  the book.
-- `Book` storage primitives (`best_bid/ask`, `head_order`, `reduce`, `insert_order`,
-  `remove_order`, `lookup`).
-- `Engine` matching loop — both sides — with price-time priority, partial fills, level deletion,
-  and residual resting.
-- Tests: `matching_test` (buy/sell sweeps), `avl_test` (balance + 200k randomized vs `std::set`),
-  `index_test` (ops + 500k randomized vs `std::unordered_map`).
+Full numbers, methodology, and honest caveats: **[`docs/benchmarks.md`](docs/benchmarks.md)**.
 
-Also done: LOBSTER parser + orderbook parser + snapshot/diff, and `verify` — reframed as a
-reconstruction-fidelity characterizer after establishing that a level-N LOBSTER *message* file is
-top-N-filtered (deep liquidity surfaces without a message trail, so exact replay is impossible; see
-the decision log). And the full benchmark path: a **calibrated MC generator** (GBM mid + power-law
-depth + add/cancel/marketable mix, seeded/reproducible) and `bench` (throughput + per-op p50/p90/
-p99/p99.9/max). macOS smoke run: ~20M ops/s, ~50 ns/op amortized (per-op tails are timer-floored on
-Apple Silicon — authoritative numbers come from Linux).
+## Design
 
-The tracer-bullet spine is complete end to end, running on hand-rolled structures. Next: run `bench`
-on the Linux host (RDTSC, CPU pinning, hugepages) for authoritative tails, plus the head-to-head
-(hand-rolled AVL/index vs `std::`); then the writeup. Deferred, profile-driven: cached best pointers
-+ level-DLL (O(1) best-advance), pointer→index migration, hot/cold split.
+Every hot-path structure is hand-written and chosen deliberately (the reasoning is logged below):
 
-## Goal
+| Component | What it is | Key ops |
+|---|---|---|
+| `Pool<T>` | fixed slab + intrusive free list — no per-order `malloc` | alloc/free **O(1)**, deterministic |
+| `OrderIndex` | open-addressing hash (linear probe, Fibonacci hash, backward-shift delete) | lookup / cancel **O(1)** |
+| `PriceTree` | recursive AVL of price levels + cached best + price-ordered level list | insert **O(log M)**, best-of-side **O(1)** |
+| per-level queue | intrusive doubly-linked list inside each `Order` | append / cancel-by-pointer **O(1)** |
+| `Book` / `Engine` | storage vs. matching-policy split, templated on the container | — |
 
-Build a credible HFT-style matching engine:
+Prices are integers (LOBSTER's 1/10000-dollar unit); the engine is side-specialized with no virtual
+calls on the matching path. `Book`/`Engine` are templated on the tree and index so the whole engine
+can be benchmarked on the hand-rolled structures *or* `std::` baselines.
 
-- Limit, market, and cancel orders (minimum).
-- Sub-microsecond per-message latency target.
-- Correctness validated against [LOBSTER](https://data.lobsterdata.com/) NASDAQ data via snapshot-diff replay.
+## Build & run
 
-## Plan
+CMake + C++20:
 
-See [`docs/plan.md`](docs/plan.md) — the research and scoping plan, including reading list, design space, scope tiers, and pre-design checklist.
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 
-## Build
+# correctness
+for t in matching avl index parser snapshot generator; do ./build/${t}_test; done
 
-CMake + C++20. Builds `liblob` (the engine), the `verify` / `bench` binaries (still
-placeholders), and `matching_test`.
-
-```
-cmake -S . -B build && cmake --build build
-./build/matching_test
+# benchmarks
+./build/structbench 5000000       # hand-rolled structures vs std::
+./build/bench 2000000 200000      # whole engine, both backends, throughput + latency
 ```
 
-Benchmarks will run on x86-64 (RDTSC, CPU pinning; hugepages/`isolcpus` need Linux); correctness work is done on macOS.
+## Correctness against real data
 
-## Data
+`verify` replays a [LOBSTER](https://data.lobsterdata.com/info/DataSamples.php) NASDAQ message file
+and diffs the reconstructed book against the reference orderbook. Sample data is **not committed**
+(large + redistributable separately) — download a free sample and drop the unzipped folder in the
+repo root (gitignored). Note: a level-*N* LOBSTER *message* file is top-*N*-filtered, so exact deep
+reconstruction is impossible from it — `verify` reports reconstruction *fidelity* and documents why
+(see the decision log). Engine correctness rests on the synthetic tests.
 
-LOBSTER sample files (message + orderbook CSVs) are **not committed** — they are large (a single AAPL hour is ~60 MB) and redistributable separately. Download a free sample from [lobsterdata.com/info/DataSamples.php](https://lobsterdata.com/info/DataSamples.php) and drop the unzipped folder in the repo root; it is gitignored.
+## Scope
 
-## Benchmarks
-
-See [`docs/benchmarks.md`](docs/benchmarks.md) — results (hand-rolled vs `std::`, whole-engine
-throughput, tail latency), honest caveats, optimization leads, and the trading/research
-implications.
+Committed to **Tier B**: limit, market, and cancel orders; a second price-level container for a
+head-to-head benchmark; honest benchmarking. IOC / FOK / GTC / cancel-replace are localized
+matching-loop extensions (noted as remaining Tier-B breadth). **Out of scope** (Tier C, future
+work): stop / stop-limit, self-trade prevention, pro-rata matching, multi-symbol, lock-free
+ingestion, raw ITCH parsing. See [`docs/plan.md`](docs/plan.md) for the full scoping.
 
 ---
 
