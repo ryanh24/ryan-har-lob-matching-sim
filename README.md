@@ -61,6 +61,12 @@ Benchmarks will run on x86-64 (RDTSC, CPU pinning; hugepages/`isolcpus` need Lin
 
 LOBSTER sample files (message + orderbook CSVs) are **not committed** — they are large (a single AAPL hour is ~60 MB) and redistributable separately. Download a free sample from [lobsterdata.com/info/DataSamples.php](https://lobsterdata.com/info/DataSamples.php) and drop the unzipped folder in the repo root; it is gitignored.
 
+## Benchmarks
+
+See [`docs/benchmarks.md`](docs/benchmarks.md) — results (hand-rolled vs `std::`, whole-engine
+throughput, tail latency), honest caveats, optimization leads, and the trading/research
+implications.
+
 ---
 
 ## Design decisions
