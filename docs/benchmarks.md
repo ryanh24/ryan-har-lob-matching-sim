@@ -44,20 +44,30 @@ design rationale is in the [README decision log](../README.md).
   allocation/rehash spike. Even understated by WSL2 noise, it's the slab-pool + open-addressing
   "no malloc on the hot path" decision showing up exactly where it was supposed to: the tail.
 
+## Optimization applied — O(1) best-of-side ✓
+
+Cached `min_`/`max_` + a price-ordered level-DLL (`prev_level`/`next_level` on each `Limit`), so
+`best_ask`/`best_bid` are O(1) instead of O(log M) tree-spine walks. Best-of-side is read on every
+marketable order and level boundary. Rotations don't touch price order, so the list and cached
+extremes need no maintenance during rebalancing. Measured **before → after (macOS, indicative)**:
+
+| Metric | before | after |
+|---|---|---|
+| `PriceTree` vs `std::map` (structbench) | 1.27× | **1.40×** |
+| whole-engine hand-rolled throughput | 20.5 M ops/s | **24.0 M ops/s** (~17%) |
+
+**Re-run on Linux pending** for the authoritative before/after (the Linux tree ratio was 1.09×).
+
 ## Further optimization (in priority order)
 
-1. **Cached best-bid/ask + level-DLL → O(1) best-of-side** (currently O(log M) via tree min/max).
-   Best-of-side is read on every marketable order and level boundary, so this should lift the tree's
-   whole-engine contribution more than a faster tree would. The thin 1.09× is the signal to do this.
-   Build it, re-measure for a clean before/after.
-2. **Native Linux + RDTSC + CPU pinning (+ hugepages)** — the only way to get trustworthy p50/p99/
+1. **Native Linux + RDTSC + CPU pinning (+ hugepages)** — the only way to get trustworthy p50/p99/
    p99.9. WSL2 + `chrono` can't resolve the sub-100 ns tail.
-3. **`OrderIndex` capacity tuning** — the fixed 2²¹-slot (32 MB) table is sparse (~50k live); test a
+2. **`OrderIndex` capacity tuning** — the fixed 2²¹-slot (32 MB) table is sparse (~50k live); test a
    smaller capacity that still holds the working set at α≤0.5, in case the large cold footprint costs
    cache/TLB on the hot path.
-4. **Pointer → `uint32` index migration** — halves reference size, ~2 orders per cache line on
+3. **Pointer → `uint32` index migration** — halves reference size, ~2 orders per cache line on
    deep-queue walks. Profile-gated (the typedef hatch makes it a small change).
-5. **Profile first, then optimize** — `perf` / cachegrind to find the real bottleneck rather than
+4. **Profile first, then optimize** — `perf` / cachegrind to find the real bottleneck rather than
    guessing; several of the above are hypotheses until a profile confirms them.
 
 ## Trading / research perspective
