@@ -20,43 +20,51 @@ design rationale is in the [README decision log](../README.md).
 
 | Structure | ours | std:: | ratio |
 |---|---|---|---|
-| `OrderIndex` vs `std::unordered_map` | 7.8 ns/op | 14.4 ns/op | **1.84×** |
-| `PriceTree` vs `std::map` | 5.7 ns/op | 6.2 ns/op | **1.09×** |
+| `OrderIndex` vs `std::unordered_map` | 7.8 ns/op | 14.7 ns/op | **1.88×** |
+| `PriceTree` vs `std::map` | 5.4 ns/op | 6.3 ns/op | **1.17×** |
 
 **Whole engine** (`bench`, 2M ops, throughput is the trustworthy number):
 
 | Backend | throughput | amortized | max (per-op) |
 |---|---|---|---|
-| hand-rolled | **32.1 M ops/s** | 31.2 ns/op | ~124 µs |
-| `std::` | 29.8 M ops/s | 33.6 ns/op | ~352 µs |
+| hand-rolled | **37.2 M ops/s** | 26.9 ns/op | ~34 µs |
+| `std::` | 29.1 M ops/s | 34.4 ns/op | ~352 µs |
+
+(Numbers above are Linux/WSL2, post-optimization — see below.)
 
 ## Interpretation
 
-- **The hash map is a clear win (1.84×);** the AVL tree is a thin one (1.09×) — libstdc++'s
-  red-black tree is well-tuned, and a pooled AVL only edges it. (`std::unordered_map` is far faster on
-  libstdc++ than on macOS/libc++, which is why the isolated hash ratio fell from 4.2× to 1.84× — the
-  baseline improved, not us.)
-- **Micro wins shrink end-to-end:** 1.84× / 1.09× on the containers become **~8%** on the whole
-  engine, because the container is only a fraction of per-message work (matching loop, intrusive DLL,
-  slab pool run regardless). That is Amdahl's law, and reporting it honestly is more credible than a
-  headline multiple.
-- **The tail still separates them:** `std::`'s max is ~2.8× worse (~352 µs vs ~124 µs) — an
-  allocation/rehash spike. Even understated by WSL2 noise, it's the slab-pool + open-addressing
-  "no malloc on the hot path" decision showing up exactly where it was supposed to: the tail.
+- **The hash map is a clear win (1.88×);** the AVL tree is a thin one (1.17×) — libstdc++'s
+  red-black tree is well-tuned, and a pooled AVL only edges it in isolation. (`std::unordered_map` is
+  far faster on libstdc++ than on macOS/libc++, which is why the isolated hash ratio is 1.88× here vs
+  4× on macOS — the baseline improved, not us.)
+- **Where the whole-engine advantage comes from:** before the O(1) best-of-side optimization, the
+  container wins (≈1.8× / 1.1×) shrank to **~8%** end-to-end — Amdahl's law, since the container is
+  only a fraction of per-message work. *After* it, the whole-engine advantage is **~28%**
+  (37.2 / 29.1) — now *larger* than the isolated tree ratio (1.17×), because O(1) best-of-side pays
+  off across the matching hot path (best is read on every marketable order and level boundary), not
+  just in isolated tree ops. The most valuable optimization was algorithmic on the hot path, not a
+  faster container.
+- **The tail still separates them:** `std::`'s max is ~10× worse (~352 µs vs ~34 µs) — an
+  allocation/rehash spike. It's the slab-pool + open-addressing "no malloc on the hot path" decision
+  showing up exactly where it was supposed to: the tail.
 
 ## Optimization applied — O(1) best-of-side ✓
 
 Cached `min_`/`max_` + a price-ordered level-DLL (`prev_level`/`next_level` on each `Limit`), so
 `best_ask`/`best_bid` are O(1) instead of O(log M) tree-spine walks. Best-of-side is read on every
 marketable order and level boundary. Rotations don't touch price order, so the list and cached
-extremes need no maintenance during rebalancing. Measured **before → after (macOS, indicative)**:
+extremes need no maintenance during rebalancing. Measured **before → after**:
 
 | Metric | before | after |
 |---|---|---|
-| `PriceTree` vs `std::map` (structbench) | 1.27× | **1.40×** |
-| whole-engine hand-rolled throughput | 20.5 M ops/s | **24.0 M ops/s** (~17%) |
+| `PriceTree` vs `std::map` (structbench, Linux) | 1.09× | **1.17×** |
+| whole-engine hand-rolled throughput (Linux) | 32.1 M ops/s | **37.2 M ops/s** (~16%) |
+| whole-engine advantage vs `std::` (Linux) | ~8% | **~28%** |
+| (macOS cross-check: `PriceTree` ratio) | 1.27× | 1.40× |
 
-**Re-run on Linux pending** for the authoritative before/after (the Linux tree ratio was 1.09×).
+The whole-engine advantage grew *more* than the isolated tree ratio — best-of-side is on the hot
+path, so making it O(1) helped the matching loop, not just tree ops.
 
 ## Further optimization (in priority order)
 
